@@ -50,7 +50,7 @@ REPO_DIR="/ocean/projects/cis240052p/pbhowal/2d_Representation_Hierarchical_Poli
 FINAL_OCEAN_DIR="/ocean/projects/cis240052p/pbhowal/2d_Representation_Hierarchical_Policy_Learning/MimicGen_Uncertainty_Dataset/D2/ABLATIONS/SIGMOID_EXPERIMENTS_GMM_PREDICTIONS/PushT_tau2.0"
 
 # --- checkpoint (EDIT HERE to change) --------------------------------------
-CKPT_PATH="${REPO_DIR}/logs/ABLATION/SIGMOID_EXPERIMENTS/PUSH_T_TASK/train_PushT_Task_GOAL_SWAP_SIGMOID_tau2.0/EDIT_ME_DATE/EDIT_ME_TIME/checkpoints/periodic-epoch=epoch=EDIT_ME.ckpt"
+CKPT_PATH="${REPO_DIR}/logs/ABLATION/SIGMOID_EXPERIMENTS/PUSH_T_TASK/train_PushT_Task_GOAL_SWAP_SIGMOID_tau2.0/2026-08-06/16-49-26/checkpoints/periodic-epoch=epoch=89.ckpt"
 if [ ! -f "${CKPT_PATH}" ]; then
     echo "[ckpt] ERROR: checkpoint not found: ${CKPT_PATH}" >&2
     echo "[ckpt] Edit CKPT_PATH in this script." >&2

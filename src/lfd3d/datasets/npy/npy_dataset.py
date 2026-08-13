@@ -190,7 +190,7 @@ class NpyDataset(BaseDataset):
         if split == "train" and dataset_cfg.get("transition_label_swap", False):
             # Two fully independent swap-probability profiles:
             #   linear  (default) — the original triangular scheme. Uses
-            #             transition_radius: p decays linearly to 0 at radius+1.
+            #             transition_radius: p decays linearly to 0 AT radius.
             #   sigmoid           — smooth profile with NO window. Uses only
             #             transition_swap_tau (temperature): every frame swaps
             #             toward the goal across its nearest transition with
@@ -202,9 +202,12 @@ class NpyDataset(BaseDataset):
             p_max = float(dataset_cfg.get("transition_swap_p_max", 0.5))
             if profile == "linear":
                 radius = int(dataset_cfg.get("transition_radius", 10))
+                # _v2 marks the formula change (denominator radius+1 -> radius,
+                # 2026-08-07). Without the bump, caches written by the old
+                # formula would be silently reused for the same (p_max, radius).
                 cache_file = (
                     self._transition_cache_dir
-                    / f".swap_meta{self._goal_src_tag}_pmax{p_max}_r{radius}.npz"
+                    / f".swap_meta{self._goal_src_tag}_pmax{p_max}_r{radius}_v2.npz"
                 )
                 compute_desc = f"profile=linear, p_max={p_max}, radius={radius}"
             elif profile == "sigmoid":
@@ -386,10 +389,13 @@ class NpyDataset(BaseDataset):
         "neighbor goal" (the goal on the other side of the nearest transition)
         and the per-frame Bernoulli swap probability:
 
-            p_swap(d) = p_max * (1 - d / (transition_radius + 1))
+            p_swap(d) = p_max * (1 - d / transition_radius)
 
-        where d = |t - t_trans|. Frames not in any window have p_swap = 0
-        and a zero neighbor goal (never read).
+        where d = |t - t_trans|. The triangle now reaches exactly 0 at
+        d = transition_radius (it previously decayed to 0 only at radius+1,
+        leaving p_max/(r+1) of swap probability at the window edge). Frames
+        not in any window have p_swap = 0 and a zero neighbor goal (never
+        read).
 
         Returns:
             neighbor_goals: (N, 4, 3) float32
@@ -438,7 +444,11 @@ class NpyDataset(BaseDataset):
 
                 global_idx = indices[local_t]
                 neighbor_goals[global_idx] = neighbor.astype(np.float32)
-                p_swap_arr[global_idx] = p_max * (1.0 - best_d / (transition_radius + 1))
+                # Triangle hits exactly 0 at d == transition_radius. max(...,1)
+                # guards a radius=0 config (only d=0 is in-window there anyway).
+                p_swap_arr[global_idx] = p_max * (
+                    1.0 - best_d / max(transition_radius, 1)
+                )
 
         return neighbor_goals, p_swap_arr
 
