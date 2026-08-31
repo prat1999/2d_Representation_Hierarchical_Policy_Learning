@@ -1,0 +1,15 @@
+{
+  "low_level_exp_dir": "/ocean/projects/cis240052p/pbhowal/2d_Representation_Hierarchical_Policy_Learning/MimicGen_Uncertainty_Code/Low_Level_Policy/2d_Representation_Hierarchical_Policy_Learning/Low_Level_and_Inference/outputs/2026.08.21/02.24.45_push_t_task_APPROACH2_c1_0.1_206demo_push_t_task_goal_gmm_aux",
+  "low_level_checkpoint": "epoch_99.ckpt",
+  "low_level_repo": "/ocean/projects/cis240052p/pbhowal/2d_Representation_Hierarchical_Policy_Learning/MimicGen_Uncertainty_Code/Low_Level_Policy/2d_Representation_Hierarchical_Policy_Learning/Low_Level_and_Inference",
+  "n_episodes": 50,
+  "max_steps": 300,
+  "seed": 100000,
+  "n_obs_steps": 2,
+  "n_action_steps": 8,
+  "render_size": 256,
+  "legacy_env": true,
+  "output_dir": "/ocean/projects/cis240052p/pbhowal/2d_Representation_Hierarchical_Policy_Learning/MimicGen_Uncertainty_Code/PushT_Task/diffusion_policy/approach2_eval/APPROACH2_2D_DIT_PUSHT_50_SAMPLES_c1_0.1_1ST_SEED",
+  "save_videos": true,
+  "video_fps": 10
+}

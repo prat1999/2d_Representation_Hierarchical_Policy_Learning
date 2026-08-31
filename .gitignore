@@ -138,3 +138,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+approach2_eval/**/APPROACH2_*/
+approach2_eval/**/SMOKE_TEST*/
+approach2_eval/**/DIAGNOSTICS/
+approach2_eval/**/logs/
