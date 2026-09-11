@@ -5,11 +5,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils import data
-
 from lfd3d.datasets.base_data import BaseDataModule, BaseDataset
 from lfd3d.datasets.rgb_text_feature_gen import get_siglip_text_embedding
 from lfd3d.utils.data_utils import collate_pcd_fn
+from torch.utils import data
 from transformers import AutoModel, AutoProcessor
 
 
@@ -68,7 +67,7 @@ class NpyDataset(BaseDataset):
 
     GRIPPER_IDX = np.array([0, 1, 2])
 
-    def __init__(
+    def __init__(  # noqa: PLR0912, PLR0913, PLR0914, PLR0915
         self,
         dataset_cfg,
         split: str = "train",
@@ -86,7 +85,7 @@ class NpyDataset(BaseDataset):
         # per-frame .npz (original behavior). The other sources read
         # goal_gripper_pcd_<source> from a parallel directory tree
         # (extra_goals_dir/demo_X/t.npz) produced by the RDP keypoint pipeline.
-        VALID_GOAL_SOURCES = (
+        valid_goal_sources = (
             "default",
             "rdp",
             "rdp_gripper",
@@ -95,12 +94,13 @@ class NpyDataset(BaseDataset):
             # AWE (greedy, th=0.35, gripper-aware) keypoints: goal_gripper_pcd_awe
             # in EXTRA_KEYPOINTS/AWE_EXTRA_KEYPOINTS/EXTRA_KEYPOINTS_awe-greedy-th0.35-grip/<TASK>.
             "awe",
+            "bspline",
         )
         self.goal_source = dataset_cfg.get("goal_source", "default")
-        if self.goal_source not in VALID_GOAL_SOURCES:
+        if self.goal_source not in valid_goal_sources:
             raise ValueError(
                 f"Invalid goal_source '{self.goal_source}'. "
-                f"Expected one of {VALID_GOAL_SOURCES}"
+                f"Expected one of {valid_goal_sources}"
             )
         self.extra_goals_dir = None
         # Per-demo source-stem -> extra-stem lookup, filled lazily by
@@ -110,8 +110,9 @@ class NpyDataset(BaseDataset):
             extra_goals_dir = dataset_cfg.get("extra_goals_dir", None)
             if not extra_goals_dir:
                 raise ValueError(
-                    f"goal_source='{self.goal_source}' requires dataset.extra_goals_dir "
-                    "to point at the EXTRA_KEYPOINTS copy of this dataset."
+                    f"goal_source='{self.goal_source}' requires "
+                    "dataset.extra_goals_dir to point at the EXTRA_KEYPOINTS "
+                    "copy of this dataset."
                 )
             self.extra_goals_dir = Path(extra_goals_dir)
             if not self.extra_goals_dir.is_dir():
@@ -127,7 +128,9 @@ class NpyDataset(BaseDataset):
         cache_dir = dataset_cfg.get("transition_cache_dir", None)
         self._transition_cache_dir = Path(cache_dir) if cache_dir else self.data_dir
         # Distinguish caches per goal source; default keeps the legacy names.
-        self._goal_src_tag = "" if self.goal_source == "default" else f"_{self.goal_source}"
+        self._goal_src_tag = (
+            "" if self.goal_source == "default" else f"_{self.goal_source}"
+        )
 
         # RL Bench datasets use a different camera schema (front_* keys, stored
         # channel-first) than MimicGen (agentview_*, channel-last). When set,
@@ -172,7 +175,9 @@ class NpyDataset(BaseDataset):
                 / f".sample_weights{self._goal_src_tag}_p{p}_r{radius}.npy"
             )
             if cache_file.exists():
-                print(f"[NpyDataset] Loading cached transition weights from {cache_file}")
+                print(
+                    f"[NpyDataset] Loading cached transition weights from {cache_file}"
+                )
                 self.sample_weights = np.load(cache_file)
                 if len(self.sample_weights) != len(self.frames):
                     print(
@@ -182,8 +187,13 @@ class NpyDataset(BaseDataset):
                     )
                     self.sample_weights = None
             if self.sample_weights is None:
-                print(f"[NpyDataset] Computing transition weights (p={p}, radius={radius})...")
-                self.sample_weights = self._compute_sample_weights(p=p, transition_radius=radius)
+                print(
+                    f"[NpyDataset] Computing transition weights "
+                    f"(p={p}, radius={radius})..."
+                )
+                self.sample_weights = self._compute_sample_weights(
+                    p=p, transition_radius=radius
+                )
                 np.save(cache_file, self.sample_weights)
                 print(f"[NpyDataset] Saved weights to {cache_file}")
 
@@ -247,10 +257,14 @@ class NpyDataset(BaseDataset):
                         transition_radius=radius, p_max=p_max
                     )
                 else:
-                    self._swap_neighbor_goals, self._swap_p = self._compute_swap_meta_sigmoid(
-                        tau=tau, p_max=p_max
+                    self._swap_neighbor_goals, self._swap_p = (
+                        self._compute_swap_meta_sigmoid(tau=tau, p_max=p_max)
                     )
-                np.savez(cache_file, neighbor_goals=self._swap_neighbor_goals, p_swap=self._swap_p)
+                np.savez(
+                    cache_file,
+                    neighbor_goals=self._swap_neighbor_goals,
+                    p_swap=self._swap_p,
+                )
                 print(f"[NpyDataset] Saved swap metadata to {cache_file}")
             # For the sigmoid profile p_swap is nonzero (but tiny) almost
             # everywhere; count frames with non-negligible probability instead.
@@ -266,8 +280,8 @@ class NpyDataset(BaseDataset):
         # "...tall dustpan" vs "...short dustpan") instead of the single
         # constant task_caption. Runs for BOTH train and val splits — the model
         # needs the matching instruction at eval time too.
-        self._lang_embeds = None     # (n_distinct, 1152) float32
-        self._lang_row = None        # (N,) int64 -> row in _lang_embeds
+        self._lang_embeds = None  # (n_distinct, 1152) float32
+        self._lang_row = None  # (N,) int64 -> row in _lang_embeds
         self._frame_captions = None  # (N,) list[str], used for the returned caption
         if dataset_cfg.get("add_language_cond", False):
             self._setup_language_conditioning()
@@ -308,28 +322,38 @@ class NpyDataset(BaseDataset):
 
         missing = [c for c in distinct if c not in embeds_by_caption]
         if missing:
-            print(f"[NpyDataset] Embedding {len(missing)} lang_goal caption(s) with SigLIP...")
+            print(
+                f"[NpyDataset] Embedding {len(missing)} lang_goal "
+                "caption(s) with SigLIP..."
+            )
             siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384")
-            processor = AutoProcessor.from_pretrained("google/siglip-so400m-patch14-384")
+            processor = AutoProcessor.from_pretrained(
+                "google/siglip-so400m-patch14-384"
+            )
             for c in missing:
                 embeds_by_caption[c] = get_siglip_text_embedding(
                     c, siglip=siglip, siglip_processor=processor, device="cpu"
                 ).astype(np.float32)
             all_caps = list(embeds_by_caption.keys())
-            all_emb = np.stack([embeds_by_caption[c] for c in all_caps]).astype(np.float32)
-            np.savez(cache_file, captions=np.array(all_caps, dtype=object), embeds=all_emb)
+            all_emb = np.stack([embeds_by_caption[c] for c in all_caps]).astype(
+                np.float32
+            )
+            np.savez(
+                cache_file, captions=np.array(all_caps, dtype=object), embeds=all_emb
+            )
             print(f"[NpyDataset] Saved lang_goal embeddings to {cache_file}")
 
         # 3) Per-frame lookup tables.
         cap_to_row = {c: j for j, c in enumerate(distinct)}
-        self._lang_embeds = np.stack(
-            [embeds_by_caption[c] for c in distinct]
-        ).astype(np.float32)
+        self._lang_embeds = np.stack([embeds_by_caption[c] for c in distinct]).astype(
+            np.float32
+        )
         self._lang_row = np.array([cap_to_row[c] for c in captions], dtype=np.int64)
         self._frame_captions = captions
         print(
             f"[NpyDataset] Language conditioning ON ({self.split}): "
-            f"{len(distinct)} distinct lang_goal(s) over {len(self.frames)} frames: {distinct}"
+            f"{len(distinct)} distinct lang_goal(s) over {len(self.frames)} "
+            f"frames: {distinct}"
         )
 
     def _load_goal(self, frame_path: Path) -> np.ndarray:
@@ -401,14 +425,13 @@ class NpyDataset(BaseDataset):
 
         for indexed_frames in frame_groups.values():
             indices = [i for i, _ in indexed_frames]
-            paths   = [f for _, f in indexed_frames]
+            paths = [f for _, f in indexed_frames]
 
-            goals = np.array([
-                self._load_goal(path) for path in paths
-            ])  # (T, 4, 3)
+            goals = np.array([self._load_goal(path) for path in paths])  # (T, 4, 3)
 
             transitions = [
-                t for t in range(1, len(goals))
+                t
+                for t in range(1, len(goals))
                 if not np.allclose(goals[t], goals[t - 1], atol=1e-6)
             ]
 
@@ -419,12 +442,12 @@ class NpyDataset(BaseDataset):
                 ):
                     is_near[indices[local_i]] = True
 
-        n_near  = is_near.sum()
+        n_near = is_near.sum()
         n_other = len(self.frames) - n_near
 
         weights = np.zeros(len(self.frames), dtype=np.float32)
         if n_near > 0:
-            weights[is_near]  = p / n_near
+            weights[is_near] = p / n_near
         if n_other > 0:
             weights[~is_near] = (1.0 - p) / n_other
 
@@ -458,14 +481,13 @@ class NpyDataset(BaseDataset):
 
         for indexed_frames in frame_groups.values():
             indices = [i for i, _ in indexed_frames]
-            paths   = [f for _, f in indexed_frames]
+            paths = [f for _, f in indexed_frames]
 
-            goals = np.array([
-                self._load_goal(path) for path in paths
-            ])  # (T, 4, 3)
+            goals = np.array([self._load_goal(path) for path in paths])  # (T, 4, 3)
 
             transitions = [
-                t for t in range(1, len(goals))
+                t
+                for t in range(1, len(goals))
                 if not np.allclose(goals[t], goals[t - 1], atol=1e-6)
             ]
             if not transitions:
@@ -485,9 +507,9 @@ class NpyDataset(BaseDataset):
                 # t_trans is the first frame of the new goal, so frames < t_trans
                 # carry the previous goal and frames >= t_trans carry the new one.
                 if local_t < best_t:
-                    neighbor = goals[best_t]            # upcoming goal
+                    neighbor = goals[best_t]  # upcoming goal
                 else:
-                    neighbor = goals[best_t - 1]        # previous goal
+                    neighbor = goals[best_t - 1]  # previous goal
 
                 global_idx = indices[local_t]
                 neighbor_goals[global_idx] = neighbor.astype(np.float32)
@@ -532,14 +554,13 @@ class NpyDataset(BaseDataset):
 
         for indexed_frames in frame_groups.values():
             indices = [i for i, _ in indexed_frames]
-            paths   = [f for _, f in indexed_frames]
+            paths = [f for _, f in indexed_frames]
 
-            goals = np.array([
-                self._load_goal(path) for path in paths
-            ])  # (T, 4, 3)
+            goals = np.array([self._load_goal(path) for path in paths])  # (T, 4, 3)
 
             transitions = [
-                t for t in range(1, len(goals))
+                t
+                for t in range(1, len(goals))
                 if not np.allclose(goals[t], goals[t - 1], atol=1e-6)
             ]
             if not transitions:
@@ -556,9 +577,9 @@ class NpyDataset(BaseDataset):
                 # t_trans is the first frame of the new goal, so frames < t_trans
                 # carry the previous goal and frames >= t_trans carry the new one.
                 if local_t < best_t:
-                    neighbor = goals[best_t]            # upcoming goal
+                    neighbor = goals[best_t]  # upcoming goal
                 else:
-                    neighbor = goals[best_t - 1]        # previous goal
+                    neighbor = goals[best_t - 1]  # previous goal
 
                 global_idx = indices[local_t]
                 neighbor_goals[global_idx] = neighbor.astype(np.float32)
@@ -584,28 +605,28 @@ class NpyDataset(BaseDataset):
         """
         if self.is_rl_bench:
             rgb = d["front_rgb"][0].transpose(1, 2, 0).astype(np.uint8)  # (H,W,3)
-            depth = d["front_depth"][0, 0].astype(np.float32)            # (H,W)
-            K = d["front_camera_intrinsics"][0].astype(np.float32)       # (3,3)
-            T = d["front_camera_extrinsics"][0].astype(np.float32)       # (4,4)
+            depth = d["front_depth"][0, 0].astype(np.float32)  # (H,W)
+            intrinsics = d["front_camera_intrinsics"][0].astype(np.float32)  # (3,3)
+            extrinsics = d["front_camera_extrinsics"][0].astype(np.float32)  # (4,4)
         else:
-            rgb = d["rgb_agentview"][0].astype(np.uint8)                 # (H,W,3)
+            rgb = d["rgb_agentview"][0].astype(np.uint8)  # (H,W,3)
             depth = d["depth_agentview"][0, :, :, 0].astype(np.float32)  # (H,W)
-            K = d["agentview_intrinsics"][0].astype(np.float32)          # (3,3)
-            T = d["agentview_extrinsics"][0].astype(np.float32)          # (4,4)
-        return rgb, depth, K, T
+            intrinsics = d["agentview_intrinsics"][0].astype(np.float32)  # (3,3)
+            extrinsics = d["agentview_extrinsics"][0].astype(np.float32)  # (4,4)
+        return rgb, depth, intrinsics, extrinsics
 
     def __len__(self):
         return len(self.frames)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx):  # noqa: PLR0914
         d = np.load(self.frames[idx], allow_pickle=True)
 
-        anchor_pcd = d["point_cloud"][0].astype(np.float32)       # (N, 3)
-        action_pcd = d["gripper_pcd"][0].astype(np.float32)       # (4, 3)
+        anchor_pcd = d["point_cloud"][0].astype(np.float32)  # (N, 3)
+        action_pcd = d["gripper_pcd"][0].astype(np.float32)  # (4, 3)
         if self.goal_source == "default":
             goal_pcd = d["goal_gripper_pcd"][0].astype(np.float32)  # (4, 3)
         else:
-            goal_pcd = self._load_goal(self.frames[idx])            # (4, 3)
+            goal_pcd = self._load_goal(self.frames[idx])  # (4, 3)
 
         # Label swap augmentation: with linearly-decaying probability around
         # transitions, replace the GT goal with the goal across the nearest
@@ -619,10 +640,10 @@ class NpyDataset(BaseDataset):
         # With normalize=False (default) this is identity (mean=0, std=1)
         if self.dataset_cfg.get("normalize", False):
             pcd_mean = action_pcd.mean(axis=0)
-            pcd_std  = anchor_pcd.std(axis=0)
+            pcd_std = anchor_pcd.std(axis=0)
         else:
             pcd_mean = np.zeros(3, dtype=np.float32)
-            pcd_std  = np.ones(3, dtype=np.float32)
+            pcd_std = np.ones(3, dtype=np.float32)
 
         action_pcd_norm = (action_pcd - pcd_mean) / pcd_std
         anchor_pcd_norm = (anchor_pcd - pcd_mean) / pcd_std
@@ -630,29 +651,31 @@ class NpyDataset(BaseDataset):
 
         # Dummy features: model won't read them with use_rgb=False, but
         # collate_pcd_fn always expects anchor_feat_pcd alongside anchor_pcd.
-        anchor_feat_pcd = np.zeros(
-            (anchor_pcd_norm.shape[0], 3), dtype=np.float32
-        )
+        anchor_feat_pcd = np.zeros((anchor_pcd_norm.shape[0], 3), dtype=np.float32)
 
         # Camera data (primary view). Schema-normalized across MimicGen
         # (agentview_*, channel-last) and RL Bench (front_*, channel-first).
         # Omitted entirely for camera-less datasets (has_camera: False).
         camera_items = {}
         if self.has_camera:
-            rgb, depth, K, T = self._read_primary_camera(d)
+            rgb, depth, intrinsics, extrinsics = self._read_primary_camera(d)
 
             # Stack start/end frames; data is already a single frame so duplicate
-            rgbs   = np.stack([rgb, rgb], axis=0)    # (2, H, W, 3)
+            rgbs = np.stack([rgb, rgb], axis=0)  # (2, H, W, 3)
             depths = np.stack([depth, depth], axis=0)  # (2, H, W)
             camera_items = {
                 # Primary camera
-                "rgbs":       rgbs,
-                "depths":     depths,
-                "intrinsics": K,
-                "extrinsics": T,
+                "rgbs": rgbs,
+                "depths": depths,
+                "intrinsics": intrinsics,
+                "extrinsics": extrinsics,
                 # Auxiliary cameras (none)
-                "aux_rgbs":       np.zeros((0, 2, rgb.shape[0], rgb.shape[1], 3), dtype=np.uint8),
-                "aux_depths":     np.zeros((0, 2, rgb.shape[0], rgb.shape[1]), dtype=np.float32),
+                "aux_rgbs": np.zeros(
+                    (0, 2, rgb.shape[0], rgb.shape[1], 3), dtype=np.uint8
+                ),
+                "aux_depths": np.zeros(
+                    (0, 2, rgb.shape[0], rgb.shape[1]), dtype=np.float32
+                ),
                 "aux_intrinsics": np.zeros((0, 3, 3), dtype=np.float32),
                 "aux_extrinsics": np.zeros((0, 4, 4), dtype=np.float32),
             }
@@ -675,32 +698,32 @@ class NpyDataset(BaseDataset):
             # dict when has_camera is False.
             **camera_items,
             # Point clouds
-            "action_pcd":       action_pcd_norm,   # (4, 3) → Pointclouds
-            "anchor_pcd":       anchor_pcd_norm,   # (N, 3) → Pointclouds(features=anchor_feat_pcd)
-            "anchor_feat_pcd":  anchor_feat_pcd,   # (N, 3) zeros
+            "action_pcd": action_pcd_norm,  # (4, 3) → Pointclouds
+            "anchor_pcd": anchor_pcd_norm,  # (N, 3) → Pointclouds(feat=anchor_feat_pcd)
+            "anchor_feat_pcd": anchor_feat_pcd,  # (N, 3) zeros
             "gripper_trajectory": gripper_trajectory,  # (10, 3) → Pointclouds
             # Labels
             "cross_displacement": cross_displacement,  # (4, 3) → Pointclouds
             # Text
-            "caption":        caption,
-            "text_embed":     text_embed,
+            "caption": caption,
+            "text_embed": text_embed,
             "actual_caption": caption,
             # Transforms / normalization
-            "start2end":  np.eye(4, dtype=np.float32),
-            "pcd_mean":   pcd_mean,
-            "pcd_std":    pcd_std,
-            "augment_R":  np.eye(3, dtype=np.float32),
-            "augment_t":  np.zeros(3, dtype=np.float32),
-            "augment_C":  anchor_pcd.mean(axis=0).astype(np.float32),
+            "start2end": np.eye(4, dtype=np.float32),
+            "pcd_mean": pcd_mean,
+            "pcd_std": pcd_std,
+            "augment_R": np.eye(3, dtype=np.float32),
+            "augment_t": np.zeros(3, dtype=np.float32),
+            "augment_C": anchor_pcd.mean(axis=0).astype(np.float32),
             # Metadata
             "gripper_idx": self.GRIPPER_IDX,
-            "vid_name":    str(self.frames[idx]),
+            "vid_name": str(self.frames[idx]),
             "data_source": "libero_franka",
         }
 
 
 class NpyDataModule(BaseDataModule):
-    def __init__(
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         batch_size,
         val_batch_size,
@@ -729,9 +752,11 @@ class NpyDataModule(BaseDataModule):
         demo_dirs_shuffled = demo_dirs[:]
         rng.shuffle(demo_dirs_shuffled)
 
-        n_val = max(1, int(len(demo_dirs_shuffled) * self.dataset_cfg.val_episode_ratio))
-        val_demos  = set(str(d) for d in demo_dirs_shuffled[:n_val])
-        train_demos = set(str(d) for d in demo_dirs_shuffled[n_val:])
+        n_val = max(
+            1, int(len(demo_dirs_shuffled) * self.dataset_cfg.val_episode_ratio)
+        )
+        val_demos = {str(d) for d in demo_dirs_shuffled[:n_val]}
+        train_demos = {str(d) for d in demo_dirs_shuffled[n_val:]}
 
         # Build frame-level indices relative to the full sorted frame list
         all_frames = []
@@ -741,8 +766,12 @@ class NpyDataModule(BaseDataModule):
             frames = sorted(demo_dir.glob("*.npz"), key=lambda p: int(p.stem))
             all_frames.extend(frames)
 
-        train_indices = [i for i, f in enumerate(all_frames) if str(f.parent) in train_demos]
-        val_indices   = [i for i, f in enumerate(all_frames) if str(f.parent) in val_demos]
+        train_indices = [
+            i for i, f in enumerate(all_frames) if str(f.parent) in train_demos
+        ]
+        val_indices = [
+            i for i, f in enumerate(all_frames) if str(f.parent) in val_demos
+        ]
         return train_indices, val_indices
 
     def setup(self, stage: str = "fit"):
