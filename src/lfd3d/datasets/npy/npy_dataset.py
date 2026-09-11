@@ -92,6 +92,9 @@ class NpyDataset(BaseDataset):
             "rdp_gripper",
             "random",
             "fixed_interval",
+            # AWE (greedy, th=0.35, gripper-aware) keypoints: goal_gripper_pcd_awe
+            # in EXTRA_KEYPOINTS/AWE_EXTRA_KEYPOINTS/EXTRA_KEYPOINTS_awe-greedy-th0.35-grip/<TASK>.
+            "awe",
         )
         self.goal_source = dataset_cfg.get("goal_source", "default")
         if self.goal_source not in VALID_GOAL_SOURCES:
@@ -100,6 +103,9 @@ class NpyDataset(BaseDataset):
                 f"Expected one of {VALID_GOAL_SOURCES}"
             )
         self.extra_goals_dir = None
+        # Per-demo source-stem -> extra-stem lookup, filled lazily by
+        # _extra_goal_path (see there for why we can't just match by name).
+        self._extra_pos_cache: dict = {}
         if self.goal_source != "default":
             extra_goals_dir = dataset_cfg.get("extra_goals_dir", None)
             if not extra_goals_dir:
@@ -336,9 +342,50 @@ class NpyDataset(BaseDataset):
         if self.goal_source == "default":
             d = np.load(frame_path, allow_pickle=True)
             return d["goal_gripper_pcd"][0].astype(np.float32)
-        extra_path = self.extra_goals_dir / frame_path.parent.name / frame_path.name
+        extra_path = self._extra_goal_path(frame_path)
         d = np.load(extra_path, allow_pickle=True)
         return d[f"goal_gripper_pcd_{self.goal_source}"][0].astype(np.float32)
+
+    def _extra_goal_path(self, frame_path: Path) -> Path:
+        """
+        Resolve the extra-goals npz for one source frame.
+
+        The extra trees are not always numbered like the source. KITCHEN_D1
+        source demos have gaps (demo_1 has no 62.npz / 362.npz), while the RDP
+        and AWE trees for those demos are numbered contiguously 0..T-1 in
+        sorted order — the same convention the low-level h5 files use.
+        Matching by file name there shifts every goal after a gap by one and
+        raises FileNotFoundError on the last frames (this killed the
+        KITCHEN_D1 RDP 100-demo run, job 43167255). So:
+
+          * extra demo dir has exactly as many frames as the source demo dir
+            -> map the i-th sorted source frame to the i-th sorted extra frame
+               (identical to name matching whenever the stems agree);
+          * otherwise, if it carries every source stem -> map by name;
+          * anything else -> error, never a silently misaligned goal.
+        """
+        demo_dir = frame_path.parent
+        key = str(demo_dir)
+        entry = self._extra_pos_cache.get(key)
+        if entry is None:
+            extra_dir = self.extra_goals_dir / demo_dir.name
+            src_stems = sorted(int(p.stem) for p in demo_dir.glob("*.npz"))
+            ext_stems = sorted(int(p.stem) for p in extra_dir.glob("*.npz"))
+            if len(ext_stems) == len(src_stems):
+                lookup = dict(zip(src_stems, ext_stems))
+            elif set(src_stems) <= set(ext_stems):
+                lookup = {s: s for s in src_stems}
+            else:
+                raise FileNotFoundError(
+                    f"{extra_dir}: {len(ext_stems)} extra-goal frames vs "
+                    f"{len(src_stems)} source frames in {demo_dir}, and the "
+                    f"extra tree does not contain every source stem — cannot "
+                    f"align goal_source='{self.goal_source}'."
+                )
+            entry = (extra_dir, lookup)
+            self._extra_pos_cache[key] = entry
+        extra_dir, lookup = entry
+        return extra_dir / f"{lookup[int(frame_path.stem)]}.npz"
 
     def _compute_sample_weights(self, p: float, transition_radius: int) -> np.ndarray:
         """
