@@ -24,3 +24,25 @@ timestamp	job_id	script
 2026-08-22T18:46:30-04:00	44212107	KITCHEN_D1_TASK/Approach2/kitchenD1_approach2_vlm.sh
 2026-08-22T18:46:31-04:00	44212109	COFFEE_PREPERATION_D1_TASK/Approach2/coffee_preperationD1_approach2_vlm.sh
 2026-08-22T18:46:34-04:00	44212110	HAMMER_CLEANUP_D1_TASK/Approach2/hammercleanupD1_approach2_vlm.sh
+2026-09-05T19:15:23-04:00	3940372	GROGU_BLACKWELL/hammercleanupD1_approach2_auxregression_relgripper_c1_10_grogu423_blackwell.sh
+2026-09-05T19:15:23-04:00	3940373	GROGU_BLACKWELL/kitchenD1_approach2_auxregression_relgripper_c1_10_grogu423_blackwell.sh
+2026-09-05T19:15:23-04:00	3940374	GROGU_BLACKWELL/coffee_preperationD1_approach2_auxregression_relgripper_c1_10_grogu423_blackwell.sh
+2026-09-09T18:47:46-04:00	3942649	GROGU_BLACKWELL/hammercleanupD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh
+2026-09-09T18:47:46-04:00	3942650	GROGU_BLACKWELL/kitchenD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh
+2026-09-09T18:47:46-04:00	3942651	GROGU_BLACKWELL/coffee_preperationD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh
+2026-09-09T18:49:19-04:00	3942652	PUSHT_D1_TASK/Approach2/pushtD1_approach2_awe_greedy_th0.35.sh
+2026-09-09T18:49:20-04:00	3942653	GROGU_BLACKWELL/pushtD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh
+2026-09-09T18:49:20-04:00	3942654	GROGU_BLACKWELL/pushtD1_approach2_auxregression_relgripper_c1_10_grogu423_blackwell.sh
+2026-09-09T18:54:04-04:00	3942661	GROGU_BLACKWELL/hammercleanupD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh  (resubmit, behind PushT)
+2026-09-09T18:54:04-04:00	3942662	GROGU_BLACKWELL/kitchenD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh  (resubmit, behind PushT)
+2026-09-09T18:54:04-04:00	3942663	GROGU_BLACKWELL/coffee_preperationD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh  (resubmit, behind PushT)
+2026-09-09T18:58:54-04:00	3942665	PUSHT_D1_TASK/Approach2/pushtD1_approach2_awe_greedy_th0.35.sh  (100 demos)
+2026-09-09T18:58:54-04:00	3942666	GROGU_BLACKWELL/pushtD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh  (100 demos)
+2026-09-09T18:58:54-04:00	3942667	GROGU_BLACKWELL/pushtD1_approach2_auxregression_relgripper_c1_10_grogu423_blackwell.sh  (100 demos)
+2026-09-09T19:02:30-04:00	3942668	GROGU_BLACKWELL/hammercleanupD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh  (resubmit behind PushT)
+2026-09-09T19:02:30-04:00	3942669	GROGU_BLACKWELL/kitchenD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh  (resubmit behind PushT)
+2026-09-09T19:02:30-04:00	3942670	GROGU_BLACKWELL/coffee_preperationD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh  (resubmit behind PushT)
+2026-09-09T19:10:22-04:00	3942671	PUSHT_D1_TASK/Approach2/pushtD1_approach2_awe_greedy_th0.35.sh  (206 demos, 200 epochs)
+2026-09-09T19:10:22-04:00	3942672	GROGU_BLACKWELL/pushtD1_approach2_auxregression_absolute_c1_10_grogu423_blackwell.sh  (206 demos, 200 epochs)
+2026-09-09T19:10:22-04:00	3942673	GROGU_BLACKWELL/pushtD1_approach2_auxregression_relgripper_c1_10_grogu423_blackwell.sh  (206 demos, 200 epochs)
+2026-09-09T19:10:22-04:00	3942674	GROGU_BLACKWELL/pushtD1_approach2_nogmm_grogu423_blackwell.sh  (206 demos, 200 epochs)

@@ -10,3 +10,26 @@ logs/
 *.err
 *.out
 .claude/
+
+# Model checkpoints / training artifacts (too large for git)
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+**/checkpoints/
+**/*_resume_ckpt/
+wandb/
+runs/
+
+# Large data files
+*.hdf5
+*.h5
+*.npz
+*.npy
+*.zarr/
+
+# Local pixi environments (machine-specific symlinks)
+.pixi/
+
+# Eval/run output dirs dropped at repo root
+/GMM_HL_*/

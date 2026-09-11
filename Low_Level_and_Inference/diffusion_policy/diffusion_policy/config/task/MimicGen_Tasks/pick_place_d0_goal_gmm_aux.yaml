@@ -1,0 +1,82 @@
+# Approach 2: no goal input to the low-level policy. goal_gripper_pts is served
+# only as the auxiliary GMM target; present_gripper_pts supplies the 4 gripper
+# anchors. Depth + camera matrices are needed to unproject patch anchors.
+#
+# Key types are chosen for how LazyArticuBotDataset routes them:
+#   depth      -> process_depth (uint16 mm -> float metres), welford normalizer
+#                 (the policy reads RAW depth from batch["obs"], not nobs)
+#   intrinsic/extrinsic -> matrix_keys, identity normalizer
+#   goal_gripper        -> loaded raw, identity normalizer
+name: pick_place_d0_goal_gmm_aux
+
+image_shape: &image_shape [3, 256, 256]
+depth_shape: &depth_shape [1, 256, 256]
+shape_meta: &shape_meta
+  obs:
+    cam0_image:
+      shape: *image_shape
+      type: rgb
+    cam1_image:
+      shape: *image_shape
+      type: rgb
+    cam0_depth:
+      shape: *depth_shape
+      type: depth
+    cam1_depth:
+      shape: *depth_shape
+      type: depth
+    cam0_intrinsic:
+      shape: [3, 3]
+      type: intrinsic
+    cam1_intrinsic:
+      shape: [3, 3]
+      type: intrinsic
+    cam0_extrinsic:
+      shape: [4, 4]
+      type: extrinsic
+    cam1_extrinsic:
+      shape: [4, 4]
+      type: extrinsic
+    state:
+      shape: [10]
+      type: low_dim
+    # Auxiliary target only — never reaches the DiT.
+    goal_gripper_pts:
+      shape: [4, 3]
+      type: goal_gripper
+    # 4 gripper keypoints: extra grounded tokens + mixture anchors.
+    present_gripper_pts:
+      shape: [4, 3]
+      type: goal_gripper
+  action:
+    shape: [10]
+
+env_runner:
+  _target_: diffusion_policy.env_runner.articubot_image_runner.ArticubotImageRunner
+  n_train: 6
+  n_train_vis: 2
+  train_start_seed: 0
+  n_test: 50
+  n_test_vis: 4
+  legacy_test: True
+  test_start_seed: 100000
+  max_steps: 300
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  fps: 10
+  past_action: ${past_action_visible}
+  n_envs: null
+  observation_mode: image
+
+dataset:
+  _target_: diffusion_policy.dataset.lazy_articubot_dataset.LazyArticuBotDataset
+  shape_meta: *shape_meta
+  data_dir: /project_data/held/teswaram/data/NEW_TASKS/NO_GMM_preds/pick_place_d0
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${dataset_obs_steps}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null
+  action_mode: ${action_mode}
