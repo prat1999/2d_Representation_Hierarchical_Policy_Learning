@@ -72,7 +72,7 @@ class LazyArticuBotDataset(BaseImageDataset):
         # goals injected into the h5 files by generate_non_gmm_goals_for_low_level.py
         # --inject_extra_goals. Only the h5 path is remapped; the model-facing
         # obs key (and shape_meta / normalizers) are unchanged.
-        VALID_GOAL_SOURCES = ('default', 'rdp', 'rdp_gripper', 'random', 'fixed_interval')
+        VALID_GOAL_SOURCES = ('default', 'rdp', 'rdp_gripper', 'random', 'fixed_interval', 'awe')
         if goal_source not in VALID_GOAL_SOURCES:
             raise ValueError(
                 f"Invalid goal_source '{goal_source}'. Expected one of {VALID_GOAL_SOURCES}"

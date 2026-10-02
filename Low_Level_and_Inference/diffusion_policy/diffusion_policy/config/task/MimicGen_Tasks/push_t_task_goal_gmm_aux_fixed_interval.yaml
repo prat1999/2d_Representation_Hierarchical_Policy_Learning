@@ -1,0 +1,113 @@
+# Approach 2 on PushT with FIXED_INTERVAL goals. Identical to push_t_task_goal_gmm_aux.yaml
+# except the auxiliary GMM target is obs/goal_gripper_pts_fixed_interval instead of
+# obs/goal_gripper_pts. Pair with policy.aux_goal_key=goal_gripper_pts_fixed_interval.
+#
+# NOT selectable via task.dataset.goal_source: that remaps EVERY
+# 'goal_gripper'-typed key, and Approach 2 also types present_gripper_pts that
+# way -- obs/present_gripper_pts_fixed_interval does not exist.
+#
+# NOTE PushT has NO rdp_gripper variant: with no gripper, "RDP snapped to
+# gripper transitions" degenerates to plain rdp. So PushT carries 5 goal
+# definitions (bayesian + these 4) where the manipulation tasks carry 6.
+# Approach 2 on PushT: no goal input to the low-level policy. goal_gripper_pts is
+# served only as the auxiliary GMM target; present_gripper_pts supplies the 4
+# gripper anchors. Depth + camera matrices ground the patch anchors.
+#
+# TWO THINGS DIFFER FROM THE MANIPULATION TASKS
+# ---------------------------------------------
+# 1. ONE camera. PushT renders a single top-down view, so there is no cam1_*.
+#    Nothing needs special-casing: the policy derives its camera list from the
+#    rgb-typed keys and the encoder derives depth/intrinsic/extrinsic key names
+#    from those stems, so n_cams simply becomes 1 and the trunk carries ~512
+#    patch tokens instead of ~1024.
+#
+# 2. state and action are 2-D (planar xy), not the 10-D
+#    [pos(3), rot6d(6), gripper(1)] of the arm tasks. The gripper keypoints are
+#    still (4, 3) with z == 0, so the trunk is unaffected.
+#
+# THE CAMERA IS SYNTHETIC
+# -----------------------
+# PushT is a 2D pymunk sim: the datagen writes no depth and no camera matrices.
+# cam0_depth / cam0_intrinsic / cam0_extrinsic were injected into the h5 files by
+# external/mimicgen/mimicgen/scripts/inject_pusht_camera_geometry.py (in the
+# inference repo), which recovers a fixed top-down camera by fitting pixel ->
+# world from obs/state against the agent's rendered position:
+#
+#     x = 0.00390712*u + 0.001747      fx = 255.9430   cx = 128
+#     y = 0.00390798*v + 0.001518      fy = 255.8867   cy = 128
+#     z = 0                            camera at (0.5019, 0.5017, 1.0), R = diag(1,1,-1)
+#
+# Fit residual 0.68 mm rms over a 1 m workspace, and the constants reproduce that
+# mapping through unproject_depth_to_world to 0.0000 mm. Depth is a constant
+# 1000 (uint16 mm = 1.0 m) — the scene is planar, so this is exact, not an
+# approximation. Only the ratio depth/fx is fixed by the data; 1.0 m was chosen
+# so fx lands at ~256 px/m for a 1 m workspace at 256 px.
+#
+# Key types are chosen for how LazyArticuBotDataset routes them:
+#   depth      -> process_depth (uint16 mm -> float metres), welford normalizer
+#                 (the policy reads RAW depth from batch["obs"], not nobs)
+#   intrinsic/extrinsic -> matrix_keys, identity normalizer
+#   goal_gripper        -> loaded raw, identity normalizer
+name: push_t_task_goal_gmm_aux_fixed_interval
+
+image_shape: &image_shape [3, 256, 256]
+depth_shape: &depth_shape [1, 256, 256]
+shape_meta: &shape_meta
+  obs:
+    cam0_image:
+      shape: *image_shape
+      type: rgb
+    cam0_depth:
+      shape: *depth_shape
+      type: depth
+    cam0_intrinsic:
+      shape: [3, 3]
+      type: intrinsic
+    cam0_extrinsic:
+      shape: [4, 4]
+      type: extrinsic
+    # Planar agent position (xy). 2-D here, 10-D on the arm tasks.
+    state:
+      shape: [2]
+      type: low_dim
+    # Auxiliary target only — never reaches the DiT.
+    goal_gripper_pts_fixed_interval:
+      shape: [4, 3]
+      type: goal_gripper
+    # 4 gripper keypoints: extra grounded tokens + mixture anchors.
+    present_gripper_pts:
+      shape: [4, 3]
+      type: goal_gripper
+  action:
+    shape: [2]
+
+env_runner:
+  _target_: diffusion_policy.env_runner.articubot_image_runner.ArticubotImageRunner
+  n_train: 6
+  n_train_vis: 2
+  train_start_seed: 0
+  n_test: 50
+  n_test_vis: 4
+  legacy_test: True
+  test_start_seed: 100000
+  max_steps: 300
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  fps: 10
+  past_action: ${past_action_visible}
+  n_envs: null
+  observation_mode: image
+
+dataset:
+  _target_: diffusion_policy.dataset.lazy_articubot_dataset.LazyArticuBotDataset
+  shape_meta: *shape_meta
+  # Overridden by the launch script (task.dataset.data_dir=<staged scratch dir>).
+  data_dir: /ocean/projects/cis240052p/pbhowal/2d_Representation_Hierarchical_Policy_Learning/MimicGen_Uncertainty_Dataset/LOW_LEVEL_GROOT_TRAINING_DATASET/NO_GMM_DATASET/PUSH_T_TASK
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${dataset_obs_steps}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null
+  action_mode: ${action_mode}

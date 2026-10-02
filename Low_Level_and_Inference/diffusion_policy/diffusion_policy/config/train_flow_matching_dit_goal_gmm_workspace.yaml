@@ -62,6 +62,26 @@ policy:
   aux_goal_key: goal_gripper_pts
   gripper_key: present_gripper_pts
 
+  # ---- auxiliary head type ----
+  # gmm        : per-anchor Gaussian mixture + ArticuBot NLL (default; every
+  #              earlier Approach 2 run). aux_gmm_* above configure it.
+  # regression : global-regression control. Masked mean over the grounded
+  #              PATCH tokens ⊕ the 4 raw current keypoints → MLP → K×3, read
+  #              as the displacement of each goal keypoint from the current
+  #              grasp centre (aux_reg_ref_keypoint), per-element MSE.
+  #              aux_gmm_loss_weight is still c1 for this head; expect to use
+  #              a much larger value (MSE in m² is ~1e-2 where the NLL was ~10).
+  # pooled_gmm : non-dense mixture control. Same pooled input as regression →
+  #              MLP → N×13: N Gaussians with NO anchors, means as displacements
+  #              from the grasp centre, one logit each. Trained with the dense
+  #              head's goal_gmm_loss (ladder + 0.1 uniform term) by anchoring
+  #              every component at the grasp centre, so c1 ≈ 0.1 carries over.
+  #              N defaults to 516 = 4 gripper + 512 patch anchors (parity).
+  aux_head_type: gmm
+  aux_reg_hidden_dim: 512
+  aux_reg_ref_keypoint: 3
+  aux_pooled_gmm_n_components: 516
+
   # ---- grounded encoder / RoPE4D trunk ----
   patch_size: 14
   n_trunk_layers: 2

@@ -1,0 +1,122 @@
+name: hammercleanup_D1_gmm_goal_gt_mix_rope
+
+# RoPE4D-grounded-vision variant of hammercleanup_D1_gmm_goal_gt_mix.
+# Verbatim copy of coffee_preperation_gmm_goal_gt_mix_rope with the task name
+# and data_dir changed (2026-09-09, for the AWE_GRIP ROPE_GOALS runs).
+#
+# IDENTICAL to that task in every respect that touches the policy — same
+# LazyArticuBotGtMixDataset, same gt_mix_p schedule, same gmm_all_goals /
+# gmm_all_weights container feeding the WCA goal pathway. The only difference is
+# that it additionally requests the geometry needed by the grounded visual
+# encoder (visual_encoder=dinov2_rope4d_grounded[_goals]), which unprojects depth
+# to give every DINOv2 patch token a world-frame 3D anchor before the DiT
+# cross-attends to it.
+#
+# The goal pathway is untouched: goals still reach the DiT through weighted
+# cross-attention over the GMM candidates. Only encoder_hidden_states changes,
+# from raw DINOv2 tokens to grounded ones.
+#
+# Added keys (all present in the LOW_LEVEL_WITH_GMM h5 files, verified for
+# HAMMER_CLEANUP_D1_GOAL_SWAP demo_0..demo_99):
+#   cam{0,1}_depth        metric depth, unprojected to per-patch anchors
+#   cam{0,1}_intrinsic    per-timestep pinhole intrinsics
+#   cam{0,1}_extrinsic    per-timestep CAMERA-TO-WORLD transform
+#   present_gripper_pts   4 gripper keypoints -> extra grounded tokens in the trunk
+#
+# identity_normalize_depth=true is REQUIRED: the encoder receives normalized obs
+# through the standard encode(nobs) interface, and unprojection needs metres. The
+# default Welford standardizer would map depth to a range including negatives,
+# which would put anchors behind the camera, silently.
+#
+# NOTE: present_gripper_pts is typed goal_gripper so the dataset serves it raw
+# (identity normalizer, no reshape). It sets has_goal_gripper=True on the policy,
+# which is inert here because has_gmm takes precedence in both the goal-encoder
+# construction and _encode_obs. Do not combine this task with a non-default
+# goal_source: that remaps every goal_gripper-typed key to obs/<key>_<source>,
+# which does not exist for present_gripper_pts. Alternative goal sources go in
+# through +task.dataset.gmm_pred_npz_dir / gt_goal_npz_dir instead.
+#
+# data_dir points at HAMMER_CLEANUP_D1_GOAL_SWAP: that is the WITH_GMM hammer
+# tree that exists (100 h5). The plain HAMMER_CLEANUP_D1 dir referenced by
+# hammercleanup_D1_gmm_goal_gt_mix.yaml no longer exists. Scripts override it.
+
+image_shape: &image_shape [3, 256, 256]
+depth_shape: &depth_shape [1, 256, 256]
+shape_meta: &shape_meta
+  obs:
+    cam0_image:
+      shape: *image_shape
+      type: rgb
+    cam1_image:
+      shape: *image_shape
+      type: rgb
+    # --- geometry for the grounded encoder (not cameras; the policy skips
+    #     these and the encoder reads them by name from nobs) ---------------
+    cam0_depth:
+      shape: *depth_shape
+      type: depth
+    cam1_depth:
+      shape: *depth_shape
+      type: depth
+    cam0_intrinsic:
+      shape: [3, 3]
+      type: intrinsic
+    cam1_intrinsic:
+      shape: [3, 3]
+      type: intrinsic
+    cam0_extrinsic:
+      shape: [4, 4]
+      type: extrinsic
+    cam1_extrinsic:
+      shape: [4, 4]
+      type: extrinsic
+    present_gripper_pts:
+      shape: [4, 3]
+      type: goal_gripper
+    state:
+      shape: [10]
+      type: low_dim
+    gmm_all_goals:
+      shape: [4500, 4, 3]  # all anchor goal predictions from the high-level GMM
+      type: gmm_goals
+    gmm_all_weights:
+      shape: [4500]         # softmax probability of each anchor
+      type: gmm_weights
+  action:
+    shape: [10]
+
+env_runner:
+  _target_: diffusion_policy.env_runner.articubot_image_runner.ArticubotImageRunner
+  n_train: 6
+  n_train_vis: 2
+  train_start_seed: 0
+  n_test: 50
+  n_test_vis: 4
+  legacy_test: True
+  test_start_seed: 100000
+  max_steps: 300
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  fps: 10
+  past_action: ${past_action_visible}
+  n_envs: null
+  observation_mode: image
+
+dataset:
+  _target_: diffusion_policy.dataset.lazy_articubot_gt_mix_dataset.LazyArticuBotGtMixDataset
+  shape_meta: *shape_meta
+  data_dir: /ocean/projects/cis240052p/pbhowal/2d_Representation_Hierarchical_Policy_Learning/LOW_LEVEL_WITH_GMM_DATASET_GROOT_STYLE_DATASET/D2/HAMMER_CLEANUP_D1_GOAL_SWAP
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${dataset_obs_steps}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null
+  action_mode: ${action_mode}
+  # Serve depth in raw METRES so the grounded encoder can unproject it.
+  identity_normalize_depth: true
+  # --- GT / predicted goal mixing (inherited from the gt_mix task) ---------
+  gt_mix_p: 0.5             # P(use GT goals this sample); null => off (pure predicted)
+  gt_transition_radius: 5   # +-window (frames) around a goal-change keyframe
+  gt_transition_pmax: 0.5   # neighbor mode weight at the transition (-> 50/50)

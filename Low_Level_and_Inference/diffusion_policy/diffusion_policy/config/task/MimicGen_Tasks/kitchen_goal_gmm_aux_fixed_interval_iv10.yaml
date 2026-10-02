@@ -1,0 +1,103 @@
+# Approach 2 with FIXED_INTERVAL goals at a 10-FRAME spacing ("iv10").
+# Identical to kitchen_goal_gmm_aux_fixed_interval.yaml except the auxiliary
+# target is obs/goal_gripper_pts_fixed_interval_iv10 instead of
+# obs/goal_gripper_pts_fixed_interval (which is the T/20 grid, ~29 frames on
+# KITCHEN_D1). Pair with policy.aux_goal_key=goal_gripper_pts_fixed_interval_iv10.
+#
+# Where the key comes from: the iv10 npz tree
+#   D2/EXTRA_KEYPOINTS/FIXED_INTERVAL_KEYPOINTS/KITCHEN_D1/iv10/demo_N/t.npz
+# stores its goal under the SAME npz key as the T/20 grid
+# (goal_gripper_pcd_fixed_interval), so it is injected into the NO_GMM h5 files
+# under an aliased name:
+#   generate_non_gmm_goals_for_low_level.py --inject_extra_goals \
+#       --extra_goal_sources fixed_interval \
+#       --extra_goal_key_alias fixed_interval=fixed_interval_iv10
+# The training scripts run that step (idempotent) before staging.
+#
+# NOT selectable via task.dataset.goal_source: that remaps EVERY
+# 'goal_gripper'-typed key, and Approach 2 also types present_gripper_pts
+# that way -- obs/present_gripper_pts_fixed_interval_iv10 does not exist (the
+# present gripper pose is goal-definition agnostic).
+# Approach 2: no goal input to the low-level policy. The goal is served only
+# as the auxiliary target; present_gripper_pts supplies the 4 gripper anchors
+# (GMM head) or the raw keypoint input (regression head). Depth + camera
+# matrices are needed to unproject patch anchors.
+#
+# Key types are chosen for how LazyArticuBotDataset routes them:
+#   depth      -> process_depth (uint16 mm -> float metres), welford normalizer
+#                 (the policy reads RAW depth from batch["obs"], not nobs)
+#   intrinsic/extrinsic -> matrix_keys, identity normalizer
+#   goal_gripper        -> loaded raw, identity normalizer
+name: kitchen_goal_gmm_aux_fixed_interval_iv10
+
+image_shape: &image_shape [3, 256, 256]
+depth_shape: &depth_shape [1, 256, 256]
+shape_meta: &shape_meta
+  obs:
+    cam0_image:
+      shape: *image_shape
+      type: rgb
+    cam1_image:
+      shape: *image_shape
+      type: rgb
+    cam0_depth:
+      shape: *depth_shape
+      type: depth
+    cam1_depth:
+      shape: *depth_shape
+      type: depth
+    cam0_intrinsic:
+      shape: [3, 3]
+      type: intrinsic
+    cam1_intrinsic:
+      shape: [3, 3]
+      type: intrinsic
+    cam0_extrinsic:
+      shape: [4, 4]
+      type: extrinsic
+    cam1_extrinsic:
+      shape: [4, 4]
+      type: extrinsic
+    state:
+      shape: [10]
+      type: low_dim
+    # Auxiliary target only — never reaches the DiT. 10-frame fixed-interval grid.
+    goal_gripper_pts_fixed_interval_iv10:
+      shape: [4, 3]
+      type: goal_gripper
+    # 4 gripper keypoints: extra grounded tokens + mixture anchors / raw head input.
+    present_gripper_pts:
+      shape: [4, 3]
+      type: goal_gripper
+  action:
+    shape: [10]
+
+env_runner:
+  _target_: diffusion_policy.env_runner.articubot_image_runner.ArticubotImageRunner
+  n_train: 6
+  n_train_vis: 2
+  train_start_seed: 0
+  n_test: 50
+  n_test_vis: 4
+  legacy_test: True
+  test_start_seed: 100000
+  max_steps: 300
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  fps: 10
+  past_action: ${past_action_visible}
+  n_envs: null
+  observation_mode: image
+
+dataset:
+  _target_: diffusion_policy.dataset.lazy_articubot_dataset.LazyArticuBotDataset
+  shape_meta: *shape_meta
+  data_dir: /ocean/projects/cis240052p/pbhowal/2d_Representation_Hierarchical_Policy_Learning/MimicGen_Uncertainty_Dataset/LOW_LEVEL_GROOT_TRAINING_DATASET/NO_GMM_DATASET/Kitchen_D1
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${dataset_obs_steps}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null
+  action_mode: ${action_mode}

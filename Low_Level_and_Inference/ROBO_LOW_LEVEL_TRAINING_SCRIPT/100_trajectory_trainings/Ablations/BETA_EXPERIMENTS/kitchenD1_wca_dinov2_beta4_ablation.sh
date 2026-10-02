@@ -63,9 +63,10 @@ echo "[demo_limit] using first NUM_DEMOS=${NUM_DEMOS} demos (demo_0.h5 .. demo_$
 # --- resume from checkpoint ----------------------------------------------
 # Resume the full training state (model + EMA + optimizer + epoch counter).
 # num_epochs is an ABSOLUTE target (resumed runs stop at 100, not +100).
-# Default is empty (fresh run). Override at submission time:
+# Defaults to the last checkpoint of the 2026.08.15 beta4 run (epoch_80).
+# Override at submission time (RESUME_CKPT= for a fresh run):
 #   RESUME_CKPT=/path/to/epoch_N.ckpt sbatch this_script.sh
-RESUME_CKPT="${RESUME_CKPT:-}"
+RESUME_CKPT="${RESUME_CKPT:-/ocean/projects/cis240052p/pbhowal/2d_Representation_Hierarchical_Policy_Learning/MimicGen_Uncertainty_Code/Low_Level_Policy/2d_Representation_Hierarchical_Policy_Learning/Low_Level_and_Inference/outputs/2026.08.15/06.41.11_groot_GMM_WCA_100demo_dinov2_Kitchen_D1_top2500_alpha1.0_beta4_bs64_kitchen_D1_gmm_goal/checkpoints/epoch_80.ckpt}"
 
 # Tag the W&B run so a resume leg is distinguishable from the original.
 if [ -n "${RESUME_CKPT}" ]; then

@@ -614,11 +614,22 @@ def process_demo_dir_push_t(demo_dir, args):
 
 # Alternative goal sources produced by the RDP keypoint pipeline. Each per-frame
 # npz in the EXTRA_KEYPOINTS tree holds goal_gripper_pcd_<source> (1, 4, 3).
-EXTRA_GOAL_SOURCES = ['rdp', 'rdp_gripper', 'random', 'fixed_interval']
+EXTRA_GOAL_SOURCES = ['rdp', 'rdp_gripper', 'random', 'fixed_interval',
+                      'bayesian_velocity', 'bayesian_velocity_no_open_close',
+                      # AWE (greedy, th=0.35, gripper-aware) keypoints. They live
+                      # in a separate npz tree (EXTRA_KEYPOINTS/AWE_EXTRA_KEYPOINTS/
+                      # EXTRA_KEYPOINTS_awe-greedy-th0.35-grip/<TASK>), so inject
+                      # them with --extra_goal_sources awe pointed at that tree.
+                      'awe']
 
 
-def inject_extra_goals_into_h5(h5_dir, extra_goals_dir, max_files=None):
+def inject_extra_goals_into_h5(h5_dir, extra_goals_dir, max_files=None, sources=None,
+                               key_alias=None):
     """Backfill obs/goal_gripper_pts_<source> datasets into existing demo h5 files.
+
+    `sources` restricts which EXTRA_GOAL_SOURCES are considered (default: all).
+    Use it when the npz tree only carries a subset (e.g. the AWE tree), so the
+    run neither scans for nor reports the sources that tree cannot provide.
 
     For each demo_N.h5 in h5_dir, reads extra_goals_dir/demo_N/t.npz (same
     per-frame layout as the main npz tree, verified frame-aligned) and writes
@@ -626,6 +637,13 @@ def inject_extra_goals_into_h5(h5_dir, extra_goals_dir, max_files=None):
     files that already have all sources are skipped, and only missing sources
     are written (append-only — existing datasets are never modified), so this
     is safe to run unconditionally at the start of every training job.
+
+    `key_alias` optionally renames a source on the h5 side, e.g.
+    {'fixed_interval': 'fixed_interval_iv10'}: the npz key stays
+    goal_gripper_pcd_fixed_interval but the dataset is written as
+    obs/goal_gripper_pts_fixed_interval_iv10. Needed when a second npz tree
+    (a different fixed-interval spacing, say) reuses an npz key whose default
+    h5 name is already taken by an earlier injection.
     """
     h5_files = sorted(
         [f for f in os.listdir(h5_dir) if f.endswith('.h5') and f.startswith('demo_')],
@@ -634,14 +652,30 @@ def inject_extra_goals_into_h5(h5_dir, extra_goals_dir, max_files=None):
     if max_files is not None:
         h5_files = h5_files[:max_files]
 
+    if sources is None:
+        sources = EXTRA_GOAL_SOURCES
+    else:
+        unknown = [s for s in sources if s not in EXTRA_GOAL_SOURCES]
+        if unknown:
+            raise ValueError(f"Unknown extra goal source(s) {unknown}; "
+                             f"expected a subset of {EXTRA_GOAL_SOURCES}")
+
+    key_alias = dict(key_alias or {})
+    bad_alias = [s for s in key_alias if s not in sources]
+    if bad_alias:
+        raise ValueError(f"--extra_goal_key_alias names source(s) {bad_alias} that are "
+                         f"not being injected ({sources})")
+    # h5 dataset suffix per source; the npz key is always goal_gripper_pcd_<source>.
+    h5_suffix = {s: key_alias.get(s, s) for s in sources}
+
     n_injected, n_skipped = 0, 0
     for fname in tqdm(h5_files, desc="Injecting extra goal keys"):
         h5_path = os.path.join(h5_dir, fname)
         demo_name = os.path.splitext(fname)[0]
 
         with h5py.File(h5_path, 'r') as f:
-            missing = [s for s in EXTRA_GOAL_SOURCES
-                       if f'obs/goal_gripper_pts_{s}' not in f]
+            missing = [s for s in sources
+                       if f'obs/goal_gripper_pts_{h5_suffix[s]}' not in f]
             T = f['obs/goal_gripper_pts'].shape[0]
         if not missing:
             n_skipped += 1
@@ -664,6 +698,22 @@ def inject_extra_goals_into_h5(h5_dir, extra_goals_dir, max_files=None):
             )
         npz_files = npz_files[:T]
 
+        # Not every task carries every source. PushT, for instance, has no
+        # rdp_gripper (it has no gripper, so "RDP snapped to gripper transitions"
+        # would degenerate to plain rdp under a misleading name) and no awe.
+        # Intersect with what this npz tree actually provides instead of
+        # KeyError-ing on the first frame.
+        available = set(np.load(os.path.join(demo_npz_dir, npz_files[0])).files)
+        unavailable = [s for s in missing
+                       if f'goal_gripper_pcd_{s}' not in available]
+        missing = [s for s in missing if f'goal_gripper_pcd_{s}' in available]
+        if unavailable and demo_name == os.path.splitext(h5_files[0])[0]:
+            print(f"  [note] {unavailable} not present in {extra_goals_dir}; skipping "
+                  f"{'it' if len(unavailable) == 1 else 'them'} for this dataset")
+        if not missing:
+            n_skipped += 1
+            continue
+
         bufs = {s: np.zeros((T, 4, 3), dtype=np.float32) for s in missing}
         for t, nf in enumerate(npz_files):
             data = np.load(os.path.join(demo_npz_dir, nf))
@@ -672,9 +722,9 @@ def inject_extra_goals_into_h5(h5_dir, extra_goals_dir, max_files=None):
 
         with h5py.File(h5_path, 'a') as f:
             for s in missing:
-                f.create_dataset(f'obs/goal_gripper_pts_{s}', data=bufs[s])
+                f.create_dataset(f'obs/goal_gripper_pts_{h5_suffix[s]}', data=bufs[s])
         n_injected += 1
-        print(f"  {demo_name}: injected {missing}")
+        print(f"  {demo_name}: injected {[f'obs/goal_gripper_pts_{h5_suffix[s]}' for s in missing]}")
 
     print(f"[inject] done: {n_injected} file(s) updated, {n_skipped} already complete.")
 
@@ -783,13 +833,24 @@ if __name__ == '__main__':
     parser.add_argument('--push_t',                action='store_true',    help='PushT npz variant: single agentview camera, native 2-D state/action (absolute target xy). Depth is all zeros and there are no camera intrinsics/extrinsics, so none are written. Requires --no_gmm.')
     parser.add_argument('--inject_extra_goals',    action='store_true',    help='Backfill obs/goal_gripper_pts_{rdp,rdp_gripper,random,fixed_interval} into existing h5 files in --dataset_dir from the --extra_goals_dir npz tree, then exit. Idempotent.')
     parser.add_argument('--extra_goals_dir',       type=str, default=None, help='EXTRA_KEYPOINTS npz tree (demo_N/t.npz with goal_gripper_pcd_<source> keys). Required with --inject_extra_goals.')
+    parser.add_argument('--extra_goal_sources',    type=str, nargs='+', default=None, help=f'Subset of {EXTRA_GOAL_SOURCES} to inject (default: all). Use e.g. "--extra_goal_sources awe" with the AWE npz tree.')
+    parser.add_argument('--extra_goal_key_alias',  type=str, nargs='+', default=None, help='Rename source(s) on the h5 side as <source>=<h5_suffix>, e.g. "fixed_interval=fixed_interval_iv10" writes obs/goal_gripper_pts_fixed_interval_iv10 from the npz key goal_gripper_pcd_fixed_interval. Use when a second npz tree reuses a key already injected from another tree.')
     args = parser.parse_args()
 
     # Injection mode: --dataset_dir is the h5 dir; no model or GMM flags involved.
     if args.inject_extra_goals:
         if not args.extra_goals_dir:
             parser.error("--inject_extra_goals requires --extra_goals_dir")
-        inject_extra_goals_into_h5(args.dataset_dir, args.extra_goals_dir, args.max_files)
+        key_alias = None
+        if args.extra_goal_key_alias:
+            key_alias = {}
+            for item in args.extra_goal_key_alias:
+                if '=' not in item:
+                    parser.error(f"--extra_goal_key_alias entries must be <source>=<h5_suffix>, got {item!r}")
+                src, suf = item.split('=', 1)
+                key_alias[src] = suf
+        inject_extra_goals_into_h5(args.dataset_dir, args.extra_goals_dir, args.max_files,
+                                   sources=args.extra_goal_sources, key_alias=key_alias)
         sys.exit(0)
 
     # Validate --no_gmm / --no_gmm_output_dir pairing
