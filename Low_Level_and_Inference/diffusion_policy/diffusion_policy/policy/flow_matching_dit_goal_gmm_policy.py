@@ -332,11 +332,32 @@ class FlowMatchingDiTGoalGMMPolicy(FlowMatchingDiTImagePolicy):
         pred_velocity = self.action_decoder(dit_out)
         fm_loss = F.mse_loss(pred_velocity, velocity_target)
 
-        if self.gmm_head is None and self.reg_head is None and self.pgmm_head is None:
-            return fm_loss
-
         prefix = "train" if self.training else "val"
-        log = {f"{prefix}_fm_loss": fm_loss.item()}
+        aux_loss, aux_log = self._compute_aux_loss(
+            vis_tok, vis_xyz, vis_valid, grip_tok, grip_xyz, batch, prefix,
+        )
+        if aux_loss is None:
+            return fm_loss
+        if wandb.run is not None:
+            wandb.log({f"{prefix}_fm_loss": fm_loss.item(), **aux_log}, commit=False)
+        return fm_loss + self.aux_gmm_loss_weight * aux_loss
+
+    def _compute_aux_loss(
+        self,
+        vis_tok: Tensor, vis_xyz: Tensor, vis_valid: Tensor,
+        grip_tok: Tensor, grip_xyz: Tensor,
+        batch: dict, prefix: str,
+    ):
+        """Dispatch to whichever auxiliary head is built.
+
+        Returns ``(aux_loss, log_dict)``, or ``(None, {})`` when no head exists
+        (the control arm). Shared with ``GMMActionDiTPolicy``, which swaps the
+        flow-matching main loss for an action-mixture NLL but keeps the same
+        auxiliary heads.
+        """
+        if self.gmm_head is None and self.reg_head is None and self.pgmm_head is None:
+            return None, {}
+        log = {}
         if self.gmm_head is not None:
             aux_loss = self._compute_goal_gmm_loss(
                 vis_tok, vis_xyz, vis_valid, grip_tok, grip_xyz,
@@ -357,9 +378,7 @@ class FlowMatchingDiTGoalGMMPolicy(FlowMatchingDiTImagePolicy):
             )
             log[f"{prefix}_goal_pooled_gmm_loss"] = aux_loss.item()
             log.update({f"{prefix}_{k}": v for k, v in pgmm_metrics.items()})
-        if wandb.run is not None:
-            wandb.log(log, commit=False)
-        return fm_loss + self.aux_gmm_loss_weight * aux_loss
+        return aux_loss, log
 
     # ===================================================================== #
     @torch.no_grad()

@@ -1,0 +1,235 @@
+# GMM-ACTION ablation of the Approach 2 workspace: the SAME network (grounded
+# DINOv2 + RoPE4D trunk, state encoder, 12-layer DiT, optional auxiliary goal
+# head) with the flow-matching objective replaced by a chunk-level Gaussian
+# mixture over actions trained with the ArticuBot NLL. The DiT's 16 action tokens
+# become N learned component queries; the flow timestep is a constant 0. One
+# forward pass at inference (mean of the highest-weight component).
+#
+# Everything below the policy block is copied verbatim from
+# train_flow_matching_dit_goal_gmm_workspace.yaml so the two are comparable.
+#
+# Arms:
+#   aux on  : policy.aux_gmm_loss_weight=<c1>  — re-measure c1! The action NLL at
+#             init is orders of magnitude above the flow-matching MSE.
+#   aux off : policy.aux_gmm_loss_weight=null  — grounded encoder, no goal loss.
+defaults:
+  - _self_
+  - task: MimicGen_Tasks/coffee_preperation_goal_gmm_aux
+  - visual_encoder: dinov2
+
+name: gmm_action_dit
+_target_: diffusion_policy.workspace.train_diffusion_unet_hybrid_workspace.TrainDiffusionUnetHybridWorkspace
+
+task_name: ${task.name}
+shape_meta: ${task.shape_meta}
+exp_name: "default"
+
+horizon: 16
+n_obs_steps: 2
+n_action_steps: 8
+n_latency_steps: 0
+dataset_obs_steps: ${n_obs_steps}
+past_action_visible: False
+keypoint_visible_rate: 1.0
+obs_as_global_cond: True
+observation_mode: "image"
+action_mode: "hybrid_delta"
+
+policy:
+  _target_: diffusion_policy.policy.gmm_action_dit_policy.GMMActionDiTPolicy
+
+  shape_meta: ${shape_meta}
+  horizon: ${horizon}
+  n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
+  n_obs_steps: ${n_obs_steps}
+  observation_mode: ${observation_mode}
+
+  crop_shape: [224, 224]
+
+  # ---- action mixture (replaces flow matching) ----
+  action_gmm_n_components: 16
+  # shared    : one sigma^2 per ladder rung over all horizon*action_dim numbers
+  # per_group : position / rotation / gripper each contribute their MEAN squared
+  #             error (error pre-scaled by 1/sqrt(group_dims*horizon))
+  action_variance_mode: shared
+  action_group_dims: [3, 6, 1]         # hybrid_delta layout: pos, rot6d, gripper
+  action_sample_component: false       # false: argmax weight; true: sample a component
+  # Same ladder / uniform-weight coefficient as the goal heads (goal_gmm_head.py).
+  action_variances: [0.01, 0.05, 0.1, 0.25, 0.5]
+  action_uniform_weights_coeff: 0.1
+
+  # ---- flow matching knobs: kept for constructor compatibility, UNUSED here ----
+  num_inference_timesteps: 10
+  noise_beta_alpha: 1.5
+  noise_beta_beta: 1.0
+  noise_s: 0.999
+  num_timestep_buckets: 1000
+
+  # ---- architecture (unchanged from the baseline) ----
+  hidden_size: 1024
+  input_embedding_dim: ${policy.hidden_size}
+  add_pos_embed: False
+  max_seq_len: 64
+
+  # ---- auxiliary goal-GMM head ----
+  # null => control arm B (no auxiliary loss, identical architecture).
+  # At init the head is zero-init so mu_n == anchor_n, putting the NLL around
+  # 5-7 per rung (~30 across the ten terms) against a flow-matching MSE of ~1;
+  # 0.01 lands the auxiliary contribution in the same order of magnitude.
+  aux_gmm_loss_weight: 0.01
+  aux_gmm_hidden_dim: 512
+  aux_goal_key: goal_gripper_pts
+  gripper_key: present_gripper_pts
+
+  # ---- auxiliary head type ----
+  # gmm        : per-anchor Gaussian mixture + ArticuBot NLL (default; every
+  #              earlier Approach 2 run). aux_gmm_* above configure it.
+  # regression : global-regression control. Masked mean over the grounded
+  #              PATCH tokens ⊕ the 4 raw current keypoints → MLP → K×3, read
+  #              as the displacement of each goal keypoint from the current
+  #              grasp centre (aux_reg_ref_keypoint), per-element MSE.
+  #              aux_gmm_loss_weight is still c1 for this head; expect to use
+  #              a much larger value (MSE in m² is ~1e-2 where the NLL was ~10).
+  # pooled_gmm : non-dense mixture control. Same pooled input as regression →
+  #              MLP → N×13: N Gaussians with NO anchors, means as displacements
+  #              from the grasp centre, one logit each. Trained with the dense
+  #              head's goal_gmm_loss (ladder + 0.1 uniform term) by anchoring
+  #              every component at the grasp centre, so c1 ≈ 0.1 carries over.
+  #              N defaults to 516 = 4 gripper + 512 patch anchors (parity).
+  aux_head_type: gmm
+  aux_reg_hidden_dim: 512
+  aux_reg_ref_keypoint: 3
+  aux_pooled_gmm_n_components: 516
+
+  # ---- grounded encoder / RoPE4D trunk ----
+  patch_size: 14
+  n_trunk_layers: 2
+  # Workspace spans ~0.6 m; base_frequency=100 makes the fastest RoPE channel
+  # 1 rad/m, so xyz_scale=5 gives ~3 rad across the scene.
+  xyz_scale: 5.0
+  # Only 2 obs steps, and t = obs_step/18, so t is a mild ordering hint rather
+  # than a separator — step identity rides in the additive temporal embedding.
+  time_scale: 1.0
+  base_frequency: 100.0
+
+  # Goal-routing flags from the baseline policy; all off. The goal never enters
+  # the DiT in this approach.
+  use_goal_cross_attention: false
+  use_weighted_cross_attention: false
+  use_alpha: false
+  wca_alpha: 1.0
+  wca_beta: 1.0
+  use_parallel_cross_attentions: false
+  use_gated_goal_residual: false
+  use_goal_adaln_modulation: false
+  use_goal_auxiliary_stream: false
+  use_per_component_state: false
+  use_state_adaln: false
+  use_gate_on_state_adaln: false
+  log_attention_grad_norms: false
+  gmm_top_k: null
+
+  diffusion_model_cfg:
+    num_attention_heads: ${eval:'${policy.hidden_size} // ${policy.diffusion_model_cfg.attention_head_dim}'}
+    attention_head_dim: 64
+    output_dim: ${policy.hidden_size}
+    num_layers: 12
+    dropout: 0.1
+    attention_bias: true
+    activation_fn: gelu-approximate
+    num_embeds_ada_norm: 1000
+    norm_type: ada_norm
+    final_dropout: true
+    positional_embeddings: sinusoidal
+    max_num_positional_embeddings: 64
+    interleave_self_attention: true
+    use_goal_cross_attention: ${policy.use_goal_cross_attention}
+    use_weighted_cross_attention: ${policy.use_weighted_cross_attention}
+    use_alpha: ${policy.use_alpha}
+    wca_alpha: ${policy.wca_alpha}
+    wca_beta: ${policy.wca_beta}
+    use_parallel_cross_attentions: ${policy.use_parallel_cross_attentions}
+    use_gated_goal_residual: ${policy.use_gated_goal_residual}
+    use_goal_adaln_modulation: ${policy.use_goal_adaln_modulation}
+    use_goal_auxiliary_stream: ${policy.use_goal_auxiliary_stream}
+    use_state_adaln: ${policy.use_state_adaln}
+    use_gate_on_state_adaln: ${policy.use_gate_on_state_adaln}
+    log_attention_grad_norms: ${policy.log_attention_grad_norms}
+
+ema:
+  _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
+  update_after_step: 0
+  inv_gamma: 1.0
+  power: 0.75
+  min_value: 0.0
+  max_value: 0.9999
+
+dataloader:
+  batch_size: 64
+  num_workers: 8
+  shuffle: True
+  pin_memory: True
+  persistent_workers: False
+
+val_dataloader:
+  batch_size: 64
+  num_workers: 8
+  shuffle: False
+  pin_memory: True
+  persistent_workers: False
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-4
+  betas: [0.95, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-6
+
+training:
+  device: "cuda:0"
+  seed: 42
+  debug: False
+  resume: False
+  lr_scheduler: cosine
+  lr_warmup_steps: 500
+  num_epochs: 100
+  gradient_accumulate_every: 1
+  use_ema: True
+  rollout_every: 50
+  checkpoint_every: 10
+  val_every: 1
+  sample_every: 5
+  max_train_steps: null
+  max_val_steps: null
+  tqdm_interval_sec: 1.0
+
+logging:
+  project: diffusion_policy
+  resume: False
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  tags: ["${task_name}", "${exp_name}"]
+  id: null
+  group: null
+
+checkpoint:
+  topk:
+    monitor_key: test_mean_score
+    mode: max
+    k: 5
+    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
+
+multi_run:
+  run_dir: outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  sweep:
+    dir: outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    subdir: ${hydra.job.num}
